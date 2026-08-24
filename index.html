@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Seating Planner</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><circle cx=%2250%22 cy=%2250%22 r=%2245%22 fill=%22%23111827%22/></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,500;0,600;0,700;1,500&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div class="app">
+
+  <header class="topbar">
+    <div class="topbar-left">
+      <div class="brand">
+        <span class="brand-dot"></span>
+        <span class="brand-name">Seating&nbsp;Planner</span>
+      </div>
+      <div class="divider"></div>
+      <div class="event-title-group">
+        <input id="eventName" class="event-name-input" type="text" value="Untitled Event" spellcheck="false">
+        <input id="eventSubtitle" class="event-subtitle-input" type="text" placeholder="Couple's names & date (optional)" spellcheck="false">
+      </div>
+    </div>
+
+    <div class="topbar-right">
+      <span class="save-indicator" id="saveIndicator">Not saved yet</span>
+      <button class="btn btn-ghost" id="btnSettings">Settings</button>
+      <button class="btn btn-ghost" id="btnSaveLoad">Save / Load</button>
+      <button class="btn btn-ghost" id="btnPrint">Print</button>
+      <button class="btn btn-primary" id="btnShare">Share</button>
+    </div>
+  </header>
+
+  <div class="dashboard-bar" id="dashboardBar">
+    <div class="stat-tiles">
+      <div class="stat-tile">
+        <span class="stat-value" id="statInvited">0</span>
+        <span class="stat-label">Invited</span>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-value" id="statSeated">0</span>
+        <span class="stat-label">Seated</span>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-value" id="statUnassigned">0</span>
+        <span class="stat-label">Unassigned</span>
+      </div>
+      <div class="stat-tile">
+        <span class="stat-value" id="statTables">0 / 8</span>
+        <span class="stat-label">Tables</span>
+      </div>
+    </div>
+    <div class="dashboard-actions">
+      <button class="btn btn-ghost btn-sm" id="btnGroups">Groups</button>
+      <button class="btn btn-ghost btn-sm" id="btnRules">
+        Rules
+        <span class="warn-badge" id="rulesWarnBadge" hidden>0</span>
+      </button>
+    </div>
+  </div>
+
+  <div class="body">
+
+    <aside class="sidebar">
+      <div class="sidebar-section">
+        <div class="sidebar-heading">
+          <h2>Guests</h2>
+          <span class="count-pill" id="guestCount">0</span>
+        </div>
+
+        <form id="addGuestForm" class="add-guest-form">
+          <input id="guestNameInput" type="text" placeholder="Add a guest name…" autocomplete="off" required>
+          <input id="guestMealInput" type="text" placeholder="Meal / dietary (optional)" autocomplete="off">
+          <button type="submit" class="btn btn-primary btn-sm">Add guest</button>
+        </form>
+
+        <div class="csv-import-row">
+          <label class="btn btn-secondary btn-sm file-input-label">
+            Import CSV
+            <input type="file" id="csvImportInput" accept=".csv,text/csv" hidden>
+          </label>
+          <span class="hint hint-inline">Columns: Name, Household (optional), Meal (optional)</span>
+        </div>
+
+        <input id="guestSearch" class="search-input" type="text" placeholder="Search guests…">
+
+        <div class="guest-scroll">
+          <div class="guest-group">
+            <div class="guest-group-label">Unassigned <span id="unassignedCount">0</span></div>
+            <ul id="unassignedList" class="guest-list" data-dropzone="unassigned"></ul>
+          </div>
+          <div class="guest-group">
+            <div class="guest-group-label">Seated <span id="seatedCount">0</span></div>
+            <ul id="seatedList" class="guest-list guest-list-seated"></ul>
+          </div>
+        </div>
+      </div>
+
+      <div class="sidebar-section venue-elements">
+        <div class="sidebar-heading">
+          <h2>Venue Elements</h2>
+        </div>
+        <p class="hint">Drag onto the floor plan</p>
+        <div class="element-palette">
+          <button class="element-chip" data-el-type="stage">Stage</button>
+          <button class="element-chip" data-el-type="dance">Dance Floor</button>
+          <button class="element-chip" data-el-type="bar">Bar</button>
+          <button class="element-chip" data-el-type="entrance">Entrance</button>
+        </div>
+      </div>
+    </aside>
+
+    <main class="canvas-wrap">
+      <div class="canvas-toolbar">
+        <div class="canvas-toolbar-left">
+          <button class="btn btn-primary" id="btnAddTable">+ Add Table</button>
+          <button class="btn btn-secondary" id="btnAutoArrange">Auto-arrange</button>
+        </div>
+        <div class="zoom-controls">
+          <button class="icon-btn" id="btnZoomOut" title="Zoom out">−</button>
+          <span id="zoomLabel">100%</span>
+          <button class="icon-btn" id="btnZoomIn" title="Zoom in">+</button>
+          <button class="icon-btn" id="btnZoomReset" title="Reset view">⤢</button>
+        </div>
+      </div>
+
+      <div class="canvas-scroll" id="canvasScroll">
+        <div class="canvas-stage" id="canvasStage">
+          <div class="canvas-floor" id="canvasFloor"></div>
+        </div>
+      </div>
+    </main>
+
+  </div>
+</div>
+
+<!-- Table edit popover -->
+<div class="popover" id="tablePopover">
+  <div class="popover-row">
+    <input type="text" id="tableNameInput" class="popover-name-input">
+    <button class="icon-btn danger" id="tableDeleteBtn" title="Delete table">✕</button>
+  </div>
+  <div class="popover-row">
+    <div class="shape-toggle">
+      <button data-shape="round" class="shape-btn active">Round</button>
+      <button data-shape="rect" class="shape-btn">Rectangle</button>
+    </div>
+  </div>
+  <div class="popover-row seats-row">
+    <span>Seats</span>
+    <div class="stepper">
+      <button class="icon-btn" id="seatsMinus">−</button>
+      <input type="number" id="seatsValue" min="1" max="40" value="6">
+      <button class="icon-btn" id="seatsPlus">+</button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div class="modal-backdrop" id="settingsModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Event Settings</h3>
+      <button class="icon-btn" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field">
+        <span>Maximum tables</span>
+        <input type="number" id="maxTablesInput" min="1" max="200" value="8">
+      </label>
+      <label class="field">
+        <span>Floor plan width (px)</span>
+        <input type="number" id="venueWidthInput" min="600" max="6000" step="50" value="1600">
+      </label>
+      <label class="field">
+        <span>Floor plan height (px)</span>
+        <input type="number" id="venueHeightInput" min="400" max="6000" step="50" value="1000">
+      </label>
+    </div>
+    <div class="modal-footer">
+      <button class="btn btn-primary" id="settingsApplyBtn">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Save/Load Modal -->
+<div class="modal-backdrop" id="saveLoadModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Save / Load Arrangements</h3>
+      <button class="icon-btn" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body">
+      <div class="save-as-row">
+        <input type="text" id="saveNameInput" placeholder="Arrangement name…">
+        <button class="btn btn-primary btn-sm" id="saveAsBtn">Save As</button>
+      </div>
+      <ul class="saves-list" id="savesList"></ul>
+      <p class="hint" id="savesEmptyHint">No saved arrangements yet.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Share Modal -->
+<div class="modal-backdrop" id="shareModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Share this arrangement</h3>
+      <button class="icon-btn" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body">
+      <label class="field">
+        <span>Shareable link (encodes the full arrangement — works once this site is hosted online)</span>
+        <div class="copy-row">
+          <input type="text" id="shareLinkInput" readonly>
+          <button class="btn btn-secondary btn-sm" id="copyLinkBtn">Copy</button>
+        </div>
+      </label>
+      <div class="or-divider"><span>or</span></div>
+      <div class="file-share-row">
+        <button class="btn btn-secondary" id="exportJsonBtn">Export .json file</button>
+        <label class="btn btn-secondary file-input-label">
+          Import .json file
+          <input type="file" id="importJsonInput" accept="application/json" hidden>
+        </label>
+      </div>
+      <div class="or-divider"><span>catering</span></div>
+      <div class="file-share-row">
+        <button class="btn btn-secondary" id="exportCateringBtn">Export catering report (.csv)</button>
+      </div>
+      <p class="hint">Send the file, or the link, to a co-planner — they can open it and pick up right where you left off.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Groups Modal -->
+<div class="modal-backdrop" id="groupsModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Groups &amp; households</h3>
+      <button class="icon-btn" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body">
+      <p class="hint">Link guests (couples, families, plus-ones) so dragging any one of them offers to seat the whole group together.</p>
+      <div class="rule-form">
+        <input type="text" id="groupNameInput" placeholder="Group name (e.g. Smith Family)">
+        <div class="guest-checklist" id="groupGuestChecklist"></div>
+        <button class="btn btn-primary btn-sm" id="createGroupBtn">Create group</button>
+      </div>
+      <ul class="entity-list" id="groupsList"></ul>
+      <p class="hint" id="groupsEmptyHint">No groups yet.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Rules Modal -->
+<div class="modal-backdrop" id="rulesModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Seating rules</h3>
+      <button class="icon-btn" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body">
+      <ul class="violation-list" id="violationList"></ul>
+      <div class="rule-form">
+        <div class="shape-toggle">
+          <button data-rule-type="together" class="shape-btn active">Must sit together</button>
+          <button data-rule-type="apart" class="shape-btn">Keep apart</button>
+        </div>
+        <div class="guest-checklist" id="ruleGuestChecklist"></div>
+        <button class="btn btn-primary btn-sm" id="createRuleBtn">Create rule</button>
+      </div>
+      <ul class="entity-list" id="rulesList"></ul>
+      <p class="hint" id="rulesEmptyHint">No rules yet.</p>
+    </div>
+  </div>
+</div>
+
+<!-- Auto-arrange results modal -->
+<div class="modal-backdrop" id="autoArrangeModal">
+  <div class="modal">
+    <div class="modal-header">
+      <h3>Auto-arrange results</h3>
+      <button class="icon-btn" data-close-modal>✕</button>
+    </div>
+    <div class="modal-body" id="autoArrangeBody"></div>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<!-- Printable floor plan (only visible when printing) -->
+<div id="printArea" class="print-area"></div>
+
+<script src="js/app.js"></script>
+</body>
+</html>
