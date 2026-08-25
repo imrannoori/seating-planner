@@ -5,6 +5,8 @@
 
   const STORAGE_CURRENT = 'seatingPlanner.current';
   const STORAGE_SAVES = 'seatingPlanner.saves';
+  const DEFAULT_ELEMENT_COLOR = '#c9b7a0';
+  const UNDO_LIMIT = 50;
 
   function uid(prefix) {
     return prefix + '_' + Math.random().toString(36).slice(2, 9) + Date.now().toString(36).slice(-4);
@@ -28,7 +30,9 @@
   let state = loadCurrent() || defaultState();
   let zoom = 1;
   let selectedTableId = null;
+  let selectedElementId = null;
   let selectedRuleType = 'together';
+  let undoStack = [];
 
   /* ===================== Persistence ===================== */
 
@@ -51,6 +55,7 @@
     merged.tables = (merged.tables || []).map(t => Object.assign({}, t, {
       seatAssignments: t.seatAssignments || new Array(t.seats).fill(null)
     }));
+    merged.elements = (merged.elements || []).map(el => Object.assign({ color: DEFAULT_ELEMENT_COLOR, shape: 'rect' }, el));
     return merged;
   }
 
@@ -131,6 +136,7 @@
   function handleSeatDrop(guestId, table, seatIndex) {
     const guest = findGuest(guestId);
     if (!guest) return;
+    pushUndo();
     const group = guest.groupId ? findGroup(guest.groupId) : null;
     const others = group ? group.guestIds.filter(id => id !== guestId).map(findGuest).filter(Boolean) : [];
 
@@ -173,6 +179,47 @@
     if (/[",\n]/.test(s)) return '"' + s.replace(/"/g, '""') + '"';
     return s;
   }
+
+  /* ===================== Undo ===================== */
+
+  function pushUndoSnapshot(snapshot) {
+    undoStack.push(snapshot);
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    updateUndoButton();
+  }
+
+  function pushUndo() {
+    pushUndoSnapshot(JSON.stringify(state));
+  }
+
+  function updateUndoButton() {
+    const btn = document.getElementById('btnUndo');
+    if (btn) btn.disabled = undoStack.length === 0;
+  }
+
+  function undo() {
+    if (!undoStack.length) { toast('Nothing to undo'); return; }
+    const prev = undoStack.pop();
+    state = normalizeState(JSON.parse(prev));
+    selectedTableId = null;
+    selectedElementId = null;
+    closePopover();
+    closeElementPopover();
+    updateUndoButton();
+    render();
+    toast('Undid last action');
+  }
+
+  document.getElementById('btnUndo').addEventListener('click', undo);
+
+  document.addEventListener('keydown', (e) => {
+    if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'z' && !e.shiftKey) {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+      e.preventDefault();
+      undo();
+    }
+  });
 
   /* ===================== Relationship rules & violations ===================== */
 
@@ -277,8 +324,7 @@
     document.getElementById('venueWidthInput').value = state.venueWidth;
     document.getElementById('venueHeightInput').value = state.venueHeight;
 
-    floorEl.style.width = state.venueWidth + 'px';
-    floorEl.style.height = state.venueHeight + 'px';
+    applyZoom();
 
     renderGuestLists();
     renderFloor();
@@ -438,6 +484,7 @@
     remove.textContent = '✕';
     remove.addEventListener('click', (e) => {
       e.stopPropagation();
+      pushUndo();
       state.guests = state.guests.filter(g => g.id !== guest.id);
       state.tables.forEach(t => {
         t.seatAssignments = t.seatAssignments.map(gid => gid === guest.id ? null : gid);
@@ -486,17 +533,37 @@
     state.elements.forEach(el => floorEl.appendChild(renderVenueElement(el)));
     state.tables.forEach(t => floorEl.appendChild(renderTable(t, violations)));
     if (selectedTableId && !findTable(selectedTableId)) closePopover();
+    if (selectedElementId && !findElement(selectedElementId)) closeElementPopover();
+  }
+
+  function elementIcon(el) {
+    return (ELEMENT_DEFS[el.type] || {}).icon || '▦';
   }
 
   function renderVenueElement(el) {
     const node = document.createElement('div');
-    node.className = 'venue-node';
+    node.className = 'venue-node' + (el.shape === 'oval' ? ' shape-oval' : '') + (el.id === selectedElementId ? ' selected' : '');
     node.style.left = el.x + 'px';
     node.style.top = el.y + 'px';
     node.style.width = el.w + 'px';
     node.style.height = el.h + 'px';
-    node.textContent = el.label;
     node.dataset.elId = el.id;
+    const color = el.color || DEFAULT_ELEMENT_COLOR;
+    node.style.setProperty('--el-border', color);
+    node.style.setProperty('--el-fill', mixColor('#fffcf8', color, 0.16));
+    node.style.setProperty('--el-stripe', mixColor('#fffcf8', color, 0.28));
+
+    const content = document.createElement('div');
+    content.className = 'venue-node-content';
+    const icon = document.createElement('span');
+    icon.className = 'venue-node-icon';
+    icon.textContent = elementIcon(el);
+    const label = document.createElement('span');
+    label.className = 'venue-node-label';
+    label.textContent = el.label;
+    content.appendChild(icon);
+    content.appendChild(label);
+    node.appendChild(content);
 
     const del = document.createElement('button');
     del.className = 'venue-delete';
@@ -504,13 +571,73 @@
     del.title = 'Remove';
     del.addEventListener('click', (e) => {
       e.stopPropagation();
+      pushUndo();
       state.elements = state.elements.filter(x => x.id !== el.id);
+      if (selectedElementId === el.id) closeElementPopover();
       render();
     });
     node.appendChild(del);
 
+    makeResizable(node, el);
     makeDraggableNode(node, el, 'element');
+
+    node.addEventListener('click', (e) => {
+      e.stopPropagation();
+      if (node.classList.contains('just-dragged') || node.classList.contains('just-resized')) return;
+      openElementPopover(el, node);
+    });
+
     return node;
+  }
+
+  const RESIZE_HANDLES = ['n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw'];
+
+  function makeResizable(node, el) {
+    RESIZE_HANDLES.forEach(pos => {
+      const handle = document.createElement('div');
+      handle.className = 'resize-handle rh-' + pos;
+      handle.addEventListener('click', e => e.stopPropagation());
+      handle.addEventListener('mousedown', (e) => {
+        if (e.button !== 0) return;
+        e.stopPropagation();
+        e.preventDefault();
+        const startX = e.clientX, startY = e.clientY;
+        const startW = el.w, startH = el.h, startElX = el.x, startElY = el.y;
+        const preSnapshot = JSON.stringify(state);
+        let moved = false;
+
+        function onMove(ev) {
+          const dx = (ev.clientX - startX) / zoom;
+          const dy = (ev.clientY - startY) / zoom;
+          if (Math.abs(dx) > 1 || Math.abs(dy) > 1) moved = true;
+          let newW = startW, newH = startH, newX = startElX, newY = startElY;
+          if (pos.includes('e')) newW = Math.max(40, startW + dx);
+          if (pos.includes('w')) { newW = Math.max(40, startW - dx); newX = startElX + (startW - newW); }
+          if (pos.includes('s')) newH = Math.max(30, startH + dy);
+          if (pos.includes('n')) { newH = Math.max(30, startH - dy); newY = startElY + (startH - newH); }
+          el.w = newW; el.h = newH;
+          el.x = Math.max(0, newX);
+          el.y = Math.max(0, newY);
+          node.style.width = el.w + 'px';
+          node.style.height = el.h + 'px';
+          node.style.left = el.x + 'px';
+          node.style.top = el.y + 'px';
+        }
+        function onUp() {
+          window.removeEventListener('mousemove', onMove);
+          window.removeEventListener('mouseup', onUp);
+          if (moved) {
+            pushUndoSnapshot(preSnapshot);
+            node.classList.add('just-resized');
+            setTimeout(() => node.classList.remove('just-resized'), 0);
+            persist();
+          }
+        }
+        window.addEventListener('mousemove', onMove);
+        window.addEventListener('mouseup', onUp);
+      });
+      node.appendChild(handle);
+    });
   }
 
   function renderTable(table, violations) {
@@ -649,17 +776,20 @@
 
   function makeDraggableNode(node, model, kind, handleEl) {
     const handle = handleEl || node;
-    let startX, startY, origX, origY, moved;
+    let startX, startY, origX, origY, moved, preSnapshot;
 
     function onMouseMove(e) {
       const dx = (e.clientX - startX) / zoom;
       const dy = (e.clientY - startY) / zoom;
       if (Math.abs(dx) > 2 || Math.abs(dy) > 2) moved = true;
-      model.x = Math.max(0, origX + dx);
-      model.y = Math.max(0, origY + dy);
+      const maxX = Math.max(0, state.venueWidth / zoom - node.offsetWidth);
+      const maxY = Math.max(0, state.venueHeight / zoom - node.offsetHeight);
+      model.x = Math.max(0, Math.min(maxX, origX + dx));
+      model.y = Math.max(0, Math.min(maxY, origY + dy));
       node.style.left = model.x + 'px';
       node.style.top = model.y + 'px';
       if (kind === 'table' && selectedTableId === model.id) positionPopover(node);
+      if (kind === 'element' && selectedElementId === model.id) positionElementPopover(node);
     }
 
     function onMouseUp() {
@@ -669,6 +799,7 @@
       if (moved) {
         node.classList.add('just-dragged');
         setTimeout(() => node.classList.remove('just-dragged'), 0);
+        pushUndoSnapshot(preSnapshot);
         persist();
       }
     }
@@ -677,8 +808,10 @@
       if (e.button !== 0) return;
       if (e.target.classList.contains('seat') || e.target.closest('.seat')) return;
       if (e.target.classList.contains('venue-delete')) return;
+      if (e.target.classList.contains('resize-handle')) return;
       if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
       moved = false;
+      preSnapshot = JSON.stringify(state);
       startX = e.clientX;
       startY = e.clientY;
       origX = model.x;
@@ -730,6 +863,7 @@
 
   document.getElementById('tableDeleteBtn').addEventListener('click', () => {
     if (!selectedTableId) return;
+    pushUndo();
     state.tables = state.tables.filter(t => t.id !== selectedTableId);
     closePopover();
     render();
@@ -739,6 +873,7 @@
     btn.addEventListener('click', () => {
       const t = findTable(selectedTableId);
       if (!t) return;
+      pushUndo();
       t.shape = btn.dataset.shape === 'round' ? 'round' : 'rect';
       popover.querySelectorAll('.shape-btn').forEach(b => b.classList.toggle('active', b === btn));
       render();
@@ -750,6 +885,7 @@
   function applySeatCount(t, next) {
     next = Math.max(1, Math.min(40, next));
     if (next === t.seats) { document.getElementById('seatsValue').value = t.seats; return; }
+    pushUndo();
     if (next < t.seats) {
       t.seatAssignments = t.seatAssignments.slice(0, next);
     } else {
@@ -785,6 +921,80 @@
     }
   });
 
+  /* ===================== Venue element popover ===================== */
+
+  const elementPopover = document.getElementById('elementPopover');
+
+  function openElementPopover(el, node) {
+    selectedElementId = el.id;
+    document.getElementById('elementNameInput').value = el.label;
+    document.getElementById('elementColorInput').value = el.color || DEFAULT_ELEMENT_COLOR;
+    elementPopover.querySelectorAll('.shape-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.elShape === (el.shape === 'oval' ? 'oval' : 'rect'));
+    });
+    elementPopover.classList.add('open');
+    positionElementPopover(node);
+    renderFloor();
+  }
+
+  function positionElementPopover(node) {
+    const rect = node.getBoundingClientRect();
+    const pw = 240;
+    let left = rect.right + 12;
+    if (left + pw > window.innerWidth - 10) left = rect.left - pw - 12;
+    elementPopover.style.left = Math.max(10, left) + 'px';
+    elementPopover.style.top = Math.max(10, rect.top) + 'px';
+  }
+
+  function closeElementPopover() {
+    selectedElementId = null;
+    elementPopover.classList.remove('open');
+  }
+
+  document.getElementById('elementNameInput').addEventListener('input', (e) => {
+    const el = findElement(selectedElementId);
+    if (!el) return;
+    el.label = e.target.value || el.label;
+    persist();
+    renderFloor();
+  });
+
+  document.getElementById('elementColorInput').addEventListener('input', (e) => {
+    const el = findElement(selectedElementId);
+    if (!el) return;
+    el.color = e.target.value;
+    persist();
+    renderFloor();
+  });
+
+  document.getElementById('elementDeleteBtn').addEventListener('click', () => {
+    if (!selectedElementId) return;
+    pushUndo();
+    state.elements = state.elements.filter(x => x.id !== selectedElementId);
+    closeElementPopover();
+    render();
+  });
+
+  elementPopover.querySelectorAll('.shape-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const el = findElement(selectedElementId);
+      if (!el) return;
+      el.shape = btn.dataset.elShape === 'oval' ? 'oval' : 'rect';
+      elementPopover.querySelectorAll('.shape-btn').forEach(b => b.classList.toggle('active', b === btn));
+      persist();
+      renderFloor();
+      const node = floorEl.querySelector(`[data-el-id="${el.id}"]`);
+      if (node) positionElementPopover(node);
+    });
+  });
+
+  document.addEventListener('click', (e) => {
+    if (elementPopover.classList.contains('open') && !elementPopover.contains(e.target) && !e.target.closest('.venue-node')) {
+      closeElementPopover();
+      renderFloor();
+    }
+  });
+
   /* ===================== Add table / elements ===================== */
 
   document.getElementById('btnAddTable').addEventListener('click', () => {
@@ -792,6 +1002,7 @@
       toast(`Table limit reached (${state.maxTables}). Raise it in Settings.`);
       return;
     }
+    pushUndo();
     const table = {
       id: uid('table'),
       name: 'Table ' + (state.tables.length + 1),
@@ -813,10 +1024,10 @@
   });
 
   const ELEMENT_DEFS = {
-    stage: { label: 'Stage', w: 180, h: 80 },
-    dance: { label: 'Dance Floor', w: 160, h: 160 },
-    bar: { label: 'Bar', w: 140, h: 60 },
-    entrance: { label: 'Entrance', w: 120, h: 50 }
+    stage: { label: 'Stage', w: 180, h: 80, icon: '🎤' },
+    dance: { label: 'Dance Floor', w: 160, h: 160, icon: '💃' },
+    bar: { label: 'Bar', w: 140, h: 60, icon: '🍸' },
+    entrance: { label: 'Entrance', w: 120, h: 50, icon: '🚪' }
   };
 
   floorEl.addEventListener('dragover', (e) => {
@@ -828,11 +1039,14 @@
     e.preventDefault();
     const def = ELEMENT_DEFS[type];
     const rect = floorEl.getBoundingClientRect();
-    const x = (e.clientX - rect.left) / zoom - def.w / 2;
-    const y = (e.clientY - rect.top) / zoom - def.h / 2;
+    const maxX = state.venueWidth / zoom;
+    const maxY = state.venueHeight / zoom;
+    const x = Math.min(maxX, Math.max(0, (e.clientX - rect.left) / zoom - def.w / 2));
+    const y = Math.min(maxY, Math.max(0, (e.clientY - rect.top) / zoom - def.h / 2));
+    pushUndo();
     state.elements.push({
-      id: uid('el'), type, label: def.label,
-      x: Math.max(0, x), y: Math.max(0, y), w: def.w, h: def.h
+      id: uid('el'), type, label: def.label, shape: 'rect', color: DEFAULT_ELEMENT_COLOR,
+      x, y, w: def.w, h: def.h
     });
     render();
   });
@@ -845,6 +1059,7 @@
     const mealInput = document.getElementById('guestMealInput');
     const name = nameInput.value.trim();
     if (!name) return;
+    pushUndo();
     state.guests.push({ id: uid('guest'), name, meal: mealInput.value.trim(), groupId: null });
     nameInput.value = '';
     mealInput.value = '';
@@ -865,6 +1080,7 @@
     unassignedListEl.removeAttribute('data-drop-active');
     const guestId = e.dataTransfer.getData('text/guest-id');
     if (!guestId) return;
+    pushUndo();
     unassignGuest(guestId);
     render();
   });
@@ -919,6 +1135,7 @@
           nameIdx = 0; householdIdx = -1; mealIdx = -1;
         }
 
+        pushUndo();
         const householdMap = {};
         let added = 0;
         dataRows.forEach(cols => {
@@ -975,6 +1192,7 @@
   document.getElementById('btnSettings').addEventListener('click', () => openModal('settingsModal'));
 
   document.getElementById('settingsApplyBtn').addEventListener('click', () => {
+    pushUndo();
     state.maxTables = Math.max(1, parseInt(document.getElementById('maxTablesInput').value, 10) || 1);
     state.venueWidth = Math.max(600, parseInt(document.getElementById('venueWidthInput').value, 10) || 1600);
     state.venueHeight = Math.max(400, parseInt(document.getElementById('venueHeightInput').value, 10) || 1000);
@@ -1030,6 +1248,7 @@
       loadBtn.className = 'btn btn-secondary btn-sm';
       loadBtn.textContent = 'Load';
       loadBtn.addEventListener('click', () => {
+        pushUndo();
         state = normalizeState(JSON.parse(JSON.stringify(save.data)));
         closeModal('saveLoadModal');
         selectedTableId = null;
@@ -1089,6 +1308,7 @@
     if (checked.length < 2) { toast('Select at least 2 guests to link into a group'); return; }
     if (!name) { toast('Give the group a name'); return; }
 
+    pushUndo();
     checked.forEach(id => {
       const g = findGuest(id);
       if (g && g.groupId) {
@@ -1134,6 +1354,7 @@
       del.textContent = '✕';
       del.title = 'Delete group';
       del.addEventListener('click', () => {
+        pushUndo();
         group.guestIds.forEach(id => { const g = findGuest(id); if (g && g.groupId === group.id) g.groupId = null; });
         state.groups = state.groups.filter(gr => gr.id !== group.id);
         renderGuestChecklist(document.getElementById('groupGuestChecklist'));
@@ -1168,6 +1389,7 @@
   document.getElementById('createRuleBtn').addEventListener('click', () => {
     const checked = Array.from(document.querySelectorAll('#ruleGuestChecklist input:checked')).map(cb => cb.value);
     if (checked.length < 2) { toast('Select at least 2 guests for this rule'); return; }
+    pushUndo();
     state.rules.push({ id: uid('rule'), type: selectedRuleType, guestIds: checked.slice() });
     renderGuestChecklist(document.getElementById('ruleGuestChecklist'));
     renderRulesList();
@@ -1200,6 +1422,7 @@
       del.textContent = '✕';
       del.title = 'Delete rule';
       del.addEventListener('click', () => {
+        pushUndo();
         state.rules = state.rules.filter(r => r.id !== rule.id);
         renderRulesList();
         renderViolationsList();
@@ -1319,6 +1542,7 @@
     const before = unassignedGuests().length;
     if (!before) { toast('Everyone is already seated'); return; }
 
+    pushUndo();
     const { placedCount, unplaced } = autoArrange();
     const body = document.getElementById('autoArrangeBody');
     body.innerHTML = '';
@@ -1388,6 +1612,7 @@
     const reader = new FileReader();
     reader.onload = () => {
       try {
+        pushUndo();
         state = normalizeState(JSON.parse(reader.result));
         selectedTableId = null;
         closeModal('shareModal');
@@ -1514,6 +1739,8 @@
   /* ===================== Zoom ===================== */
 
   function applyZoom() {
+    floorEl.style.width = (state.venueWidth / zoom) + 'px';
+    floorEl.style.height = (state.venueHeight / zoom) + 'px';
     stageEl.style.transform = `scale(${zoom})`;
     document.getElementById('zoomLabel').textContent = Math.round(zoom * 100) + '%';
   }
@@ -1524,6 +1751,6 @@
   /* ===================== Init ===================== */
 
   loadFromHash();
-  applyZoom();
+  updateUndoButton();
   render();
 })();

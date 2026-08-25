@@ -29,6 +29,7 @@
 
     <div class="topbar-right">
       <span class="save-indicator" id="saveIndicator">Not saved yet</span>
+      <button class="icon-btn" id="btnUndo" title="Undo last action (Ctrl/Cmd+Z)" disabled>↺</button>
       <button class="btn btn-ghost" id="btnSettings">Settings</button>
       <button class="btn btn-ghost" id="btnSaveLoad">Save / Load</button>
       <button class="btn btn-ghost" id="btnPrint">Print</button>
@@ -158,6 +159,24 @@
       <input type="number" id="seatsValue" min="1" max="40" value="6">
       <button class="icon-btn" id="seatsPlus">+</button>
     </div>
+  </div>
+</div>
+
+<!-- Venue element edit popover -->
+<div class="popover" id="elementPopover">
+  <div class="popover-row">
+    <input type="text" id="elementNameInput" class="popover-name-input">
+    <button class="icon-btn danger" id="elementDeleteBtn" title="Delete element">✕</button>
+  </div>
+  <div class="popover-row">
+    <div class="shape-toggle">
+      <button data-el-shape="rect" class="shape-btn active">Rectangle</button>
+      <button data-el-shape="oval" class="shape-btn">Oval</button>
+    </div>
+  </div>
+  <div class="popover-row seats-row">
+    <span>Color</span>
+    <input type="color" id="elementColorInput" value="#c9b7a0">
   </div>
 </div>
 

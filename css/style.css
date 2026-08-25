@@ -215,6 +215,8 @@ button, input {
 }
 .icon-btn:hover { background: var(--surface-2); color: var(--text); border-color: var(--border-strong); }
 .icon-btn.danger:hover { background: var(--danger-soft); color: var(--danger); border-color: var(--danger); }
+.icon-btn:disabled { opacity: 0.35; cursor: default; pointer-events: none; }
+#btnUndo { font-size: 16px; }
 
 /* ---------- Body layout ---------- */
 
@@ -789,24 +791,58 @@ button, input {
 /* ---------- Venue elements ---------- */
 
 .venue-node {
+  --el-border: #c9b7a0;
+  --el-fill: rgba(255,252,248,0.7);
+  --el-stripe: rgba(255,252,248,0.9);
   position: absolute;
-  border: 1.5px dashed var(--border-strong);
+  box-sizing: border-box;
+  border: 2px dashed var(--el-border);
   border-radius: var(--radius);
-  background: rgba(255,252,248,0.7);
+  background-color: var(--el-fill);
+  background-image: repeating-linear-gradient(135deg, var(--el-stripe) 0 10px, transparent 10px 20px);
   display: flex;
   align-items: center;
   justify-content: center;
+  cursor: grab;
+  transition: box-shadow .15s ease, transform .15s ease;
+  box-shadow: var(--shadow-sm);
+}
+.venue-node:hover { box-shadow: var(--shadow-md); transform: translateY(-1px); }
+.venue-node.shape-oval { border-radius: 50%; }
+
+.venue-node.selected {
+  box-shadow: 0 0 0 3px var(--accent-soft), 0 0 0 1.5px var(--accent), var(--shadow-md);
+}
+
+.venue-node.dragging { cursor: grabbing; z-index: 50; box-shadow: var(--shadow-lg); }
+
+.venue-node-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  pointer-events: none;
+  padding: 6px;
+  text-align: center;
+}
+
+.venue-node-icon {
+  font-size: 16px;
+  line-height: 1;
+  filter: grayscale(0.15);
+}
+
+.venue-node-label {
   font-family: var(--font-display);
   font-size: 12px;
   font-weight: 600;
   letter-spacing: 0.02em;
-  color: var(--text-faint);
-  cursor: grab;
-  transition: border-color .15s, background .15s;
+  color: var(--text-muted);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.venue-node:hover { border-color: var(--accent); background: rgba(255,252,248,0.92); }
-
-.venue-node.dragging { cursor: grabbing; z-index: 50; }
 
 .venue-node .venue-delete {
   position: absolute;
@@ -823,9 +859,35 @@ button, input {
   align-items: center;
   justify-content: center;
   cursor: pointer;
+  z-index: 6;
 }
 .venue-node:hover .venue-delete { display: flex; }
 .venue-node .venue-delete:hover { color: var(--danger); border-color: var(--danger); }
+
+/* ---------- Resize handles (venue elements) ---------- */
+
+.resize-handle {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--surface);
+  border: 1.5px solid var(--el-border, var(--accent));
+  border-radius: 3px;
+  z-index: 7;
+  opacity: 0;
+  transition: opacity .12s ease;
+}
+.venue-node:hover .resize-handle,
+.venue-node.selected .resize-handle { opacity: 1; }
+
+.rh-n  { top: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.rh-s  { bottom: -5px; left: 50%; transform: translateX(-50%); cursor: ns-resize; }
+.rh-e  { right: -5px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.rh-w  { left: -5px; top: 50%; transform: translateY(-50%); cursor: ew-resize; }
+.rh-ne { top: -5px; right: -5px; cursor: nesw-resize; }
+.rh-sw { bottom: -5px; left: -5px; cursor: nesw-resize; }
+.rh-nw { top: -5px; left: -5px; cursor: nwse-resize; }
+.rh-se { bottom: -5px; right: -5px; cursor: nwse-resize; }
 
 /* ---------- Popover ---------- */
 
@@ -891,6 +953,16 @@ button, input {
   font-size: 12.5px;
   font-weight: 600;
   color: var(--text-muted);
+}
+
+.seats-row input[type="color"] {
+  width: 40px;
+  height: 28px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 2px;
+  background: var(--surface-2);
+  cursor: pointer;
 }
 
 .stepper {
