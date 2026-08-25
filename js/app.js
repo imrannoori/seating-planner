@@ -406,6 +406,53 @@
     renderDashboard();
   }
 
+  function assignGuestToTableQuick(guestId, tableId) {
+    if (!tableId) {
+      pushUndo();
+      unassignGuest(guestId);
+      render();
+      return;
+    }
+    const table = findTable(tableId);
+    if (!table) { render(); return; }
+    const emptyIdx = table.seatAssignments.findIndex(gid => !gid);
+    if (emptyIdx === -1) {
+      toast(`${table.name} is full.`);
+      render();
+      return;
+    }
+    handleSeatDrop(guestId, table, emptyIdx);
+  }
+
+  function buildTableSelect(currentTableId, guestId) {
+    const select = document.createElement('select');
+    select.className = 'chip-table-select';
+    select.addEventListener('mousedown', e => e.stopPropagation());
+    select.addEventListener('click', e => e.stopPropagation());
+
+    const noneOpt = document.createElement('option');
+    noneOpt.value = '';
+    noneOpt.textContent = 'Unassigned';
+    select.appendChild(noneOpt);
+
+    state.tables.forEach(t => {
+      const opt = document.createElement('option');
+      opt.value = t.id;
+      const isCurrent = t.id === currentTableId;
+      const full = !isCurrent && t.seatAssignments.every(Boolean);
+      opt.textContent = t.name + (full ? ' (Full)' : '');
+      opt.disabled = full;
+      select.appendChild(opt);
+    });
+
+    select.value = currentTableId || '';
+    select.addEventListener('change', (e) => {
+      assignGuestToTableQuick(guestId, e.target.value);
+    });
+
+    return select;
+  }
+
   function groupCard(group, members) {
     const li = document.createElement('li');
     li.className = 'group-card';
@@ -429,6 +476,8 @@
       meta.textContent = `${group.guestIds.length - members.length} already seated elsewhere in this group`;
       li.appendChild(meta);
     }
+
+    li.appendChild(buildTableSelect('', repId));
 
     li.addEventListener('dragstart', (e) => {
       e.dataTransfer.setData('text/guest-id', repId);
@@ -470,13 +519,6 @@
       }
     }
 
-    if (table) {
-      const tag = document.createElement('span');
-      tag.className = 'chip-table';
-      tag.textContent = table.name;
-      rightWrap.appendChild(tag);
-    }
-
     const remove = document.createElement('button');
     remove.className = 'chip-remove';
     remove.type = 'button';
@@ -497,6 +539,8 @@
     rightWrap.appendChild(remove);
     top.appendChild(rightWrap);
     li.appendChild(top);
+
+    li.appendChild(buildTableSelect(table ? table.id : '', guest.id));
 
     const mealInput = document.createElement('input');
     mealInput.type = 'text';
